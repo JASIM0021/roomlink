@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSocket } from '@/hooks/useSocket';
 import { useVideoCall } from '@/hooks/useVideoCall';
+import { useScreenProtection } from '@/hooks/useScreenProtection';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { VideoCall } from '@/components/video/VideoCall';
 import { IncomingCallModal } from '@/components/video/IncomingCallModal';
@@ -70,6 +71,17 @@ export default function RoomPage() {
     toggleMute,
     toggleCamera,
   } = useVideoCall({ socket, currentUser, users });
+
+  // Screen capture protection
+  const { isProtected, screenshotAttempted } = useScreenProtection({
+    onScreenshotAttempt: () => {
+      toast.error('Screenshots are not allowed in this room', {
+        icon: '🔒',
+        duration: 3000,
+      });
+    },
+    blurOnHidden: true,
+  });
 
   useEffect(() => {
     if (isConnected) {
@@ -162,7 +174,39 @@ export default function RoomPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col select-none">
+      {/* Screen Protection Overlay */}
+      <AnimatePresence>
+        {(isProtected || screenshotAttempted) && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center"
+          >
+            <div className="text-center p-8">
+              <motion.div
+                initial={{ scale: 0.8 }}
+                animate={{ scale: 1 }}
+                className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-red-500/20 mb-6"
+              >
+                <svg className="w-10 h-10 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </motion.div>
+              <h2 className="text-2xl font-bold text-white mb-2">
+                {screenshotAttempted ? 'Screenshot Blocked' : 'Content Protected'}
+              </h2>
+              <p className="text-white/60 max-w-sm">
+                {screenshotAttempted
+                  ? 'Screenshots are not allowed in this private room for security reasons.'
+                  : 'Return to this window to view the conversation. Content is hidden for your privacy.'}
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <RoomHeader
         roomId={roomId}

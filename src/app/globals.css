@@ -195,3 +195,39 @@
 .animate-pulse-glow {
   animation: pulse-glow 2s ease-in-out infinite;
 }
+
+/* Screen capture protection styles */
+.protected-content {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Prevent drag */
+.protected-content * {
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  -o-user-drag: none;
+  user-drag: none;
+}
+
+/* Media query to detect print screen (limited browser support) */
+@media print {
+  .protected-content {
+    display: none !important;
+  }
+  body::after {
+    content: "Content protected - printing not allowed";
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    inset: 0;
+    background: black;
+    color: white;
+    font-size: 24px;
+  }
+}

@@ -106,7 +106,7 @@ export function ChatContainer({
 
   return (
     <div
-      className="flex-1 flex flex-col relative"
+      className="flex-1 flex flex-col relative protected-content"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
