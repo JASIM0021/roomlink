@@ -8,6 +8,9 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { toast } from 'sonner';
 
+// Backend API URL
+const API_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+
 export default function HomePage() {
   const router = useRouter();
   const [roomCode, setRoomCode] = useState('');
@@ -23,7 +26,7 @@ export default function HomePage() {
 
     setIsCreating(true);
     try {
-      const res = await fetch('/api/create-room', { method: 'POST' });
+      const res = await fetch(`${API_URL}/api/create-room`, { method: 'POST' });
       const { roomId } = await res.json();
       localStorage.setItem('roomlink-username', userName);
       router.push(`/room/${roomId}`);
@@ -46,7 +49,7 @@ export default function HomePage() {
 
     setIsJoining(true);
     try {
-      const res = await fetch(`/api/room/${roomCode.trim()}`);
+      const res = await fetch(`${API_URL}/api/room/${roomCode.trim()}`);
       const { exists } = await res.json();
 
       if (!exists) {
