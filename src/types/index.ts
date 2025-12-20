@@ -79,4 +79,13 @@ export interface ClientToServerEvents {
   'webrtc-offer': (data: { offer: RTCSessionDescriptionInit; to: string }) => void;
   'webrtc-answer': (data: { answer: RTCSessionDescriptionInit; to: string }) => void;
   'webrtc-ice-candidate': (data: { candidate: RTCIceCandidateInit; to: string }) => void;
+  'send-file-chunk': (data: {
+    fileId: string;
+    fileName: string;
+    fileType: string;
+    fileSize: number;
+    chunk: ArrayBuffer;
+    chunkIndex: number;
+    totalChunks: number;
+  }) => void;
 }
