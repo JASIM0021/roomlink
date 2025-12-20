@@ -16,9 +16,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "RoomLink - Private Messaging",
   description: "Create private, ephemeral chat rooms for secure messaging, file sharing, and video calls",
-  icons: {
-    icon: "/favicon.ico",
-  },
 };
 
 export default function RootLayout({
