@@ -32,12 +32,111 @@ interface UseVideoCallReturn {
   toggleCamera: () => void;
 }
 
-const ICE_SERVERS = {
+const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' }
-  ]
+    // For users behind strict NAT add a TURN server here, e.g.
+    // { urls: 'turn:your.turn.host:3478', username: '...', credential: '...' }
+  ],
+  // Gather candidates early to shorten call setup time
+  iceCandidatePoolSize: 4,
+  // Single transport for audio+video: fewer ports, faster connect
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require'
 };
+
+// Quality / bandwidth targets
+const VIDEO_MAX_BITRATE = 1_500_000; // 1.5 Mbps is plenty for 720p30 with VP9/VP8
+const VIDEO_MAX_FRAMERATE = 30;
+const AUDIO_MAX_BITRATE = 32_000; // Opus 32 kbps = clear voice
+
+const VIDEO_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 1280, max: 1920 },
+  height: { ideal: 720, max: 1080 },
+  frameRate: { ideal: 30, max: 30 },
+  facingMode: 'user'
+};
+
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  channelCount: 1,
+  sampleRate: 48000
+};
+
+// Prefer efficient codecs (VP9 -> VP8), keep the rest (rtx/red/fec) as fallback
+function preferVideoCodecs(transceiver: RTCRtpTransceiver) {
+  try {
+    const caps = RTCRtpReceiver.getCapabilities('video');
+    if (!caps || !transceiver.setCodecPreferences) return;
+    const rank = (mime: string) => {
+      const m = mime.toLowerCase();
+      if (m === 'video/vp9') return 0;
+      if (m === 'video/vp8') return 1;
+      return 2;
+    };
+    const sorted = [...caps.codecs].sort((a, b) => rank(a.mimeType) - rank(b.mimeType));
+    transceiver.setCodecPreferences(sorted);
+  } catch (error) {
+    console.warn('Could not set codec preferences:', error);
+  }
+}
+
+async function tuneSender(sender: RTCRtpSender, kind: string) {
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) {
+      params.encodings = [{}];
+    }
+    const enc = params.encodings[0];
+    if (kind === 'video') {
+      enc.maxBitrate = VIDEO_MAX_BITRATE;
+      enc.maxFramerate = VIDEO_MAX_FRAMERATE;
+      enc.networkPriority = 'high';
+      // Under congestion keep the frame rate smooth (low latency), drop resolution first
+      (params as RTCRtpSendParameters & { degradationPreference?: string })
+        .degradationPreference = 'maintain-framerate';
+    } else {
+      enc.maxBitrate = AUDIO_MAX_BITRATE;
+      enc.networkPriority = 'high';
+      enc.priority = 'high';
+    }
+    await sender.setParameters(params);
+  } catch (error) {
+    console.warn(`Could not tune ${kind} sender:`, error);
+  }
+}
+
+function addTracksWithQuality(pc: RTCPeerConnection, stream: MediaStream) {
+  stream.getTracks().forEach(track => {
+    const sender = pc.addTrack(track, stream);
+    if (track.kind === 'video') {
+      // Motion hint: favour smoothness over fine detail for camera video
+      track.contentHint = 'motion';
+      const transceiver = pc.getTransceivers().find(t => t.sender === sender);
+      if (transceiver) preferVideoCodecs(transceiver);
+    }
+    void tuneSender(sender, track.kind);
+  });
+}
+
+// Opus: in-band FEC (loss resilience), DTX (silence = no bandwidth), mono voice bitrate cap
+function optimizeSdp(sdp: string | undefined): string | undefined {
+  if (!sdp) return sdp;
+  return sdp.replace(
+    /a=fmtp:(\d+) (.*minptime=10.*)/g,
+    (line, pt, params) => {
+      if (params.includes('useinbandfec')) {
+        return line.includes('usedtx')
+          ? line
+          : `a=fmtp:${pt} ${params};usedtx=1;maxaveragebitrate=${AUDIO_MAX_BITRATE}`;
+      }
+      return `a=fmtp:${pt} ${params};useinbandfec=1;usedtx=1;maxaveragebitrate=${AUDIO_MAX_BITRATE}`;
+    }
+  );
+}
 
 export function useVideoCall({ socket, currentUser, users }: UseVideoCallOptions): UseVideoCallReturn {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -83,8 +182,8 @@ export function useVideoCall({ socket, currentUser, users }: UseVideoCallOptions
   const getMediaStream = useCallback(async (video: boolean) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: video ? { width: 1280, height: 720 } : false
+        audio: AUDIO_CONSTRAINTS,
+        video: video ? VIDEO_CONSTRAINTS : false
       });
       return stream;
     } catch (error) {
@@ -133,9 +232,7 @@ export function useVideoCall({ socket, currentUser, users }: UseVideoCallOptions
     const pc = createPeerConnection();
     peerConnectionRef.current = pc;
 
-    stream.getTracks().forEach(track => {
-      pc.addTrack(track, stream);
-    });
+    addTracksWithQuality(pc, stream);
 
     console.log('Emitting initiate-call event');
     socket.emit('initiate-call', { isVideo: video });
@@ -154,9 +251,7 @@ export function useVideoCall({ socket, currentUser, users }: UseVideoCallOptions
     const pc = createPeerConnection();
     peerConnectionRef.current = pc;
 
-    stream.getTracks().forEach(track => {
-      pc.addTrack(track, stream);
-    });
+    addTracksWithQuality(pc, stream);
 
     socket.emit('accept-call');
     setIncomingCall(null);
@@ -212,6 +307,7 @@ export function useVideoCall({ socket, currentUser, users }: UseVideoCallOptions
 
       try {
         const offer = await peerConnectionRef.current.createOffer();
+        offer.sdp = optimizeSdp(offer.sdp);
         await peerConnectionRef.current.setLocalDescription(offer);
 
         const otherUser = users.find(u => u.id !== currentUser?.id);
@@ -244,6 +340,7 @@ export function useVideoCall({ socket, currentUser, users }: UseVideoCallOptions
         pendingCandidatesRef.current = [];
 
         const answer = await peerConnectionRef.current.createAnswer();
+        answer.sdp = optimizeSdp(answer.sdp);
         await peerConnectionRef.current.setLocalDescription(answer);
 
         socket.emit('webrtc-answer', { answer, to: data.from });
